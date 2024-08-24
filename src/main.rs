@@ -1,5 +1,6 @@
 use git2::{Repository, RepositoryState};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::{env, fs};
 
 #[derive(Debug)]
@@ -38,7 +39,7 @@ fn execute_action(path: &Path, action: Action) -> Result<(), String> {
 
 fn execute_test(
     path: &Path,
-    _command: &str,
+    command: &str,
     start_commit: &str,
     end_commit: &str,
 ) -> Result<(), String> {
@@ -58,16 +59,43 @@ fn execute_test(
     if let Err(e) = revwalk.push_range(&format!("{}..{}", start_commit, end_commit)) {
         return Err(format!("failed to set revwalk range: {}", e));
     };
-
+    let (command, args) = parse_command(command)?;
     for commit_id in revwalk {
         let commit_id =
             commit_id.map_err(|e| format!("failed to iterate over commits due to {e}"))?;
         let commit = repo
             .find_commit(commit_id)
             .map_err(|e| format!("failed to find commit due to {e}"))?;
-        dbg!(commit_id, commit);
+        repo.set_head_detached(commit.id())
+            .map_err(|err| format!("failed to detach head due to {err}"))?;
+        let tree = commit
+            .tree()
+            .map_err(|err| format!("failed to get tree due to {err}"))?;
+        repo.checkout_tree(&(tree.as_object()), None)
+            .map_err(|err| format!("failed to checkout commit due to {err}"))?;
+        let result = run_command(path, &command, &args)?;
+        println!("{commit_id} : {result}")
     }
     Ok(())
+}
+
+fn parse_command(command: &str) -> Result<(String, Vec<String>), String> {
+    let mut parts = command.split_whitespace();
+    let first = parts
+        .next()
+        .ok_or_else(|| String::from("empty command"))?
+        .to_string();
+    let rest = parts.map(|each| each.to_string()).collect::<Vec<String>>();
+    Ok((first, rest))
+}
+
+fn run_command(path: &Path, command: &str, args: &[String]) -> Result<bool, String> {
+    let status = Command::new(command)
+        .args(args)
+        .current_dir(path)
+        .status()
+        .map_err(|err| format!("failed to excute command {command} at {path:?} due to {err}"))?;
+    Ok(status.success())
 }
 
 fn parse_args() -> Result<Args, String> {
