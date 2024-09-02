@@ -43,40 +43,74 @@ fn execute_test(
     start_commit: &str,
     end_commit: &str,
 ) -> Result<(), String> {
-    // TODO: given walking the commit history is common factor this to a seperate object that can
-    // take actions and initialized with path, commit range
-    let repo = Repository::open(path).map_err(|_| "failed to open repository")?;
-    if repo.state() != RepositoryState::Clean {
-        return Err(String::from(
-            "repository is not clean, comit any changes before running gitwalker",
-        ));
-    }
-
-    let mut revwalk = repo
-        .revwalk()
-        .map_err(|err| format!("failed to create a revwalk due to {err}"))?;
-
-    if let Err(e) = revwalk.push_range(&format!("{}..{}", start_commit, end_commit)) {
-        return Err(format!("failed to set revwalk range: {}", e));
+    let walker = GitWalker::init(path)?;
+    let range = Range {
+        start: start_commit.to_owned(),
+        end: end_commit.to_owned(),
     };
     let (command, args) = parse_command(command)?;
-    for commit_id in revwalk {
-        let commit_id =
-            commit_id.map_err(|e| format!("failed to iterate over commits due to {e}"))?;
-        let commit = repo
-            .find_commit(commit_id)
-            .map_err(|e| format!("failed to find commit due to {e}"))?;
-        repo.set_head_detached(commit.id())
-            .map_err(|err| format!("failed to detach head due to {err}"))?;
-        let tree = commit
-            .tree()
-            .map_err(|err| format!("failed to get tree due to {err}"))?;
-        repo.checkout_tree(&(tree.as_object()), None)
-            .map_err(|err| format!("failed to checkout commit due to {err}"))?;
+    walker.checkout_and_execute_in_range(range, || {
         let result = run_command(path, &command, &args)?;
-        println!("{commit_id} : {result}")
-    }
+        println!("{result}");
+        Ok(true)
+    })?;
     Ok(())
+}
+
+struct GitWalker {
+    repo: Repository,
+}
+
+struct Range {
+    start: String,
+    end: String,
+}
+
+impl GitWalker {
+    fn init(path: &Path) -> Result<GitWalker, String> {
+        let repo = Repository::open(path).map_err(|_| "failed to open repository")?;
+        if repo.state() != RepositoryState::Clean {
+            return Err(String::from(
+                "repository is not clean, comit any changes before running gitwalker",
+            ));
+        }
+
+        Ok(GitWalker { repo })
+    }
+
+    fn checkout_and_execute_in_range(
+        &self,
+        range: Range,
+        mut func: impl FnMut() -> Result<bool, String>,
+    ) -> Result<(), String> {
+        let mut revwalk = self
+            .repo
+            .revwalk()
+            .map_err(|err| format!("failed to create a revwalk due to {err}"))?;
+
+        if let Err(e) = revwalk.push_range(&format!("{}..{}", range.start, range.end)) {
+            return Err(format!("failed to set revwalk range: {}", e));
+        };
+        for commit_id in revwalk {
+            let commit_id =
+                commit_id.map_err(|e| format!("failed to iterate over commits due to {e}"))?;
+            let commit = self
+                .repo
+                .find_commit(commit_id)
+                .map_err(|e| format!("failed to find commit due to {e}"))?;
+            self.repo
+                .set_head_detached(commit.id())
+                .map_err(|err| format!("failed to detach head due to {err}"))?;
+            let tree = commit
+                .tree()
+                .map_err(|err| format!("failed to get tree due to {err}"))?;
+            self.repo
+                .checkout_tree(&(tree.as_object()), None)
+                .map_err(|err| format!("failed to checkout commit due to {err}"))?;
+            func()?;
+        }
+        Ok(())
+    }
 }
 
 fn parse_command(command: &str) -> Result<(String, Vec<String>), String> {
