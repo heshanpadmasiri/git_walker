@@ -22,10 +22,17 @@ jobs:
                 toolchain: stable
             - name: Install clippy
               run: rustup component add clippy
+            - name: Clone test repo
+              run: |
+                git clone https://github.com/heshanpadmasiri/gitwalker_test_repo.git ${{ env.TEST_REPO }}
+              env:
+                TEST_REPO: ${{ github.workspace }}/test_repo
             - name: Build and test
               run: |
                 cargo build --verbose
                 cargo test --verbose
+              env:
+                TEST_REPO: ${{ github.workspace }}/test_repo
             - name: Run Clippy
               run: cargo clippy -- -D warnings
             - name: Format code
