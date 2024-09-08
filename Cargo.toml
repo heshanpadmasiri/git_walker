@@ -3,5 +3,8 @@ name = "git_walker"
 version = "0.1.0"
 edition = "2021"
 
+[dev-dependencies]
+tempfile = "3.3"
+
 [dependencies]
 git2 = "0.19.0"
