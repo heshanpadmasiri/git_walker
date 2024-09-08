@@ -1,5 +1,5 @@
-use std::fs;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 mod utils;
@@ -36,7 +36,6 @@ fn execute_action(path: &Path, action: Action) -> Result<(), String> {
         }) => utils::execute_test(path, &command, &start, &end),
     }
 }
-
 
 fn parse_args() -> Result<Args, String> {
     let args: Vec<String> = env::args().collect();

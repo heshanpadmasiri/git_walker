@@ -71,7 +71,7 @@ impl GitWalker {
                 .tree()
                 .map_err(|err| format!("failed to get tree due to {err}"))?;
             self.repo
-                .checkout_tree(&(tree.as_object()), None)
+                .checkout_tree(tree.as_object(), None)
                 .map_err(|err| format!("failed to checkout commit due to {err}"))?;
             func()?;
         }
