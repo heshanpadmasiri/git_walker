@@ -101,14 +101,12 @@ fn run_command(path: &Path, command: &str, args: &[String]) -> Result<bool, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, path::PathBuf};
     use tempfile::TempDir;
 
     fn create_temp_copy_of_test_repository() -> TempDir {
         let temp_dir = TempDir::new().expect("failed to create temp directory");
-
-        // log current working directory
-        let submodule_path = Path::join(&std::env::current_dir().unwrap(), "./gitwalker_test_repo");
+        let submodule_path = PathBuf::from(std::env::var("TEST_REPO").unwrap());
         let target_path = temp_dir.path().join("gitwalker_test_repo");
 
         copy_directory(&submodule_path, &target_path);
