@@ -1,4 +1,4 @@
-use git2::{Oid, Repository, RepositoryState};
+use git2::{Commit, ObjectType, Oid, Repository, RepositoryState};
 use std::path::Path;
 
 #[derive(Debug)]
@@ -69,13 +69,36 @@ pub fn execute_test(
         start: start_commit.to_owned(),
         end: end_commit.to_owned(),
     };
-    walker.checkout_and_execute_in_range(range, |commit_id| {
+    walker.checkout_and_execute_in_range(range, |commit| {
         let result = run_command(path, &command.command, &command.args, !command.verbose)?;
         let result = if result { "✓" } else { "✗" };
-        println!("{commit_id} : {result}");
+        let commit_id = commit.id();
+        match commit_message(commit) {
+            Some(message) => println!("{commit_id} : {message} : {result}"),
+            None => println!("{commit_id} : {result}"),
+        }
         Ok(true)
     })?;
     Ok(())
+}
+
+fn commit_message(commit: &Commit) -> Option<String> {
+    match commit.message() {
+        Some(message) => {
+            let message = message.trim();
+            if message.is_empty() {
+                None
+            } else {
+                let len = message.len();
+                if len < 20 {
+                    Some(format!("{:<23}", message))
+                } else {
+                    Some(format!("{:.20}...", message))
+                }
+            }
+        }
+        None => None,
+    }
 }
 
 struct GitWalker {
@@ -103,7 +126,7 @@ impl GitWalker {
     fn checkout_and_execute_in_range(
         &self,
         range: Range,
-        func: impl FnMut(&Oid) -> Result<bool, String>,
+        func: impl FnMut(&Commit) -> Result<bool, String>,
     ) -> Result<(), String> {
         let current_branch = self.get_current_branch();
         let result = self.checkout_and_execute_in_range_inner(range, func);
@@ -137,19 +160,33 @@ impl GitWalker {
     fn checkout_and_execute_in_range_inner(
         &self,
         range: Range,
-        mut func: impl FnMut(&Oid) -> Result<bool, String>,
+        mut func: impl FnMut(&Commit) -> Result<bool, String>,
     ) -> Result<(), String> {
         let mut revwalk = self
             .repo
             .revwalk()
             .map_err(|err| format!("failed to create a revwalk due to {err}"))?;
 
-        if let Err(e) = revwalk.push_range(&format!("{}..{}", range.start, range.end)) {
-            return Err(format!("failed to set revwalk range: {}", e));
-        };
-        for commit_id in revwalk {
-            let commit_id =
-                commit_id.map_err(|e| format!("failed to iterate over commits due to {e}"))?;
+        let revspec = self
+            .repo
+            .revparse(&format!("{}..{}", range.start, range.end))
+            .unwrap();
+        let from = revspec.from().unwrap().id();
+        let to = revspec.to().unwrap().id();
+        revwalk.push(to).unwrap();
+        if revspec.mode().contains(git2::RevparseMode::MERGE_BASE) {
+            let base = self.repo.merge_base(from, to).unwrap();
+            let o = self
+                .repo
+                .find_object(base, Some(ObjectType::Commit))
+                .unwrap();
+            revwalk.push(o.id()).unwrap();
+        }
+        revwalk.hide(from).unwrap();
+        let commit_ids = revwalk
+            .collect::<Result<Vec<Oid>, git2::Error>>()
+            .map_err(|e| format!("failed to collect commit ids due to {e}"))?;
+        for commit_id in commit_ids {
             let commit = self
                 .repo
                 .find_commit(commit_id)
@@ -163,7 +200,10 @@ impl GitWalker {
             self.repo
                 .checkout_tree(tree.as_object(), None)
                 .map_err(|err| format!("failed to checkout commit due to {err}"))?;
-            func(&commit_id)?;
+            self.repo
+                .reset(commit.as_object(), git2::ResetType::Hard, None)
+                .map_err(|err| format!("failed to reset to commit due to {err}"))?;
+            func(&commit)?;
         }
         Ok(())
     }
@@ -264,8 +304,10 @@ mod tests {
             end: String::from("59d58e3"),
         };
         let (command, args) = parse_command("python3 test.py").unwrap();
+        let expected_results = vec![true, false];
+        let mut index = 0;
         walker
-            .checkout_and_execute_in_range(range, |_| {
+            .checkout_and_execute_in_range(range, |commit| {
                 let result = run_command(
                     &temp_dir.path().join("gitwalker_test_repo"),
                     &command,
@@ -273,9 +315,13 @@ mod tests {
                     true,
                 )
                 .unwrap();
-                assert!(result);
+                dbg!(result, index, commit);
+                let expected_result = expected_results.get(index).unwrap();
+                index += 1;
+                assert_eq!(result, *expected_result);
                 Ok(true)
             })
-            .unwrap()
+            .unwrap();
+        assert_eq!(index, expected_results.len());
     }
 }
