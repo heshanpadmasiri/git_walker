@@ -1,13 +1,15 @@
+use crate::utils::Command;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod utils;
+
 #[derive(Debug)]
 struct TestCommand {
     start: String,
     end: String,
-    command: String,
+    command: Command,
 }
 
 #[derive(Debug)]
@@ -67,16 +69,49 @@ fn finish_parsing_test_args(
     start_commit: &str,
     end_commit: &str,
 ) -> Result<Args, String> {
-    match remaining_args {
-        [] => Err(String::from("expected a command to test")),
-        [command] => Ok(Args {
-            path,
-            action: Action::Test(TestCommand {
-                start: start_commit.to_string(),
-                end: end_commit.to_string(),
-                command: command.to_string(),
-            }),
+    let command = parse_command(remaining_args)?;
+    Ok(Args {
+        path,
+        action: Action::Test(TestCommand {
+            start: start_commit.to_string(),
+            end: end_commit.to_string(),
+            command,
         }),
-        _ => Err(String::from("too many arguments")),
+    })
+}
+
+fn parse_command(remaining_args: &[String]) -> Result<Command, String> {
+    match remaining_args {
+        [] => Err(String::from("expected a command")),
+        [command] => Command::try_from(command),
+        [command, rest @ ..] => {
+            let mut command = Command::try_from(command)?;
+            let options = parse_options(rest)?;
+            if options.verbose {
+                command = command.as_verbose();
+            }
+            Ok(command)
+        }
     }
+}
+
+struct ArgOptions {
+    verbose: bool,
+}
+
+impl Default for ArgOptions {
+    fn default() -> Self {
+        Self { verbose: false }
+    }
+}
+
+fn parse_options(remaining_args: &[String]) -> Result<ArgOptions, String> {
+    let mut options = ArgOptions::default();
+    for arg in remaining_args {
+        match arg.as_str() {
+            "--verbose" => options.verbose = true,
+            _ => return Err(format!("unknown option {arg}")),
+        }
+    }
+    Ok(options)
 }

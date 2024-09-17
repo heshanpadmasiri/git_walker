@@ -1,11 +1,66 @@
 use git2::{Oid, Repository, RepositoryState};
 use std::path::Path;
-use std::process::Command;
+
+#[derive(Debug)]
+pub struct Command {
+    pub command: String,
+    pub args: Vec<String>,
+    pub verbose: bool,
+}
+
+impl Command {
+    pub fn as_verbose(&self) -> Command {
+        Command {
+            command: self.command.clone(),
+            args: self.args.clone(),
+            verbose: true,
+        }
+    }
+}
+
+impl TryFrom<&String> for Command {
+    type Error = String;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
+
+impl TryFrom<String> for Command {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(&value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
+
+impl TryFrom<&str> for Command {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
 
 // TODO: add option to be silent
 pub fn execute_test(
     path: &Path,
-    command: &str,
+    command: &Command,
     start_commit: &str,
     end_commit: &str,
 ) -> Result<(), String> {
@@ -14,9 +69,8 @@ pub fn execute_test(
         start: start_commit.to_owned(),
         end: end_commit.to_owned(),
     };
-    let (command, args) = parse_command(command)?;
     walker.checkout_and_execute_in_range(range, |commit_id| {
-        let result = run_command(path, &command, &args)?;
+        let result = run_command(path, &command.command, &command.args, !command.verbose)?;
         let result = if result { "✓" } else { "✗" };
         println!("{commit_id} : {result}");
         Ok(true)
@@ -125,12 +179,18 @@ fn parse_command(command: &str) -> Result<(String, Vec<String>), String> {
     Ok((first, rest))
 }
 
-fn run_command(path: &Path, command: &str, args: &[String]) -> Result<bool, String> {
-    let status = Command::new(command)
+fn run_command(path: &Path, command: &str, args: &[String], silent: bool) -> Result<bool, String> {
+    let status = std::process::Command::new(command)
         .args(args)
         .current_dir(path)
+        .stdout(if silent {
+            std::process::Stdio::null()
+        } else {
+            std::process::Stdio::inherit()
+        })
         .status()
         .map_err(|err| format!("failed to excute command {command} at {path:?} due to {err}"))?;
+
     Ok(status.success())
 }
 
@@ -210,6 +270,7 @@ mod tests {
                     &temp_dir.path().join("gitwalker_test_repo"),
                     &command,
                     &args,
+                    true,
                 )
                 .unwrap();
                 assert!(result);
