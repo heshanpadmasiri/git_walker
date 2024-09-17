@@ -1,7 +1,8 @@
-use git2::{Repository, RepositoryState};
+use git2::{Oid, Repository, RepositoryState};
 use std::path::Path;
 use std::process::Command;
 
+// TODO: add option to be silent
 pub fn execute_test(
     path: &Path,
     command: &str,
@@ -14,9 +15,10 @@ pub fn execute_test(
         end: end_commit.to_owned(),
     };
     let (command, args) = parse_command(command)?;
-    walker.checkout_and_execute_in_range(range, || {
+    walker.checkout_and_execute_in_range(range, |commit_id| {
         let result = run_command(path, &command, &args)?;
-        println!("{result}");
+        let result = if result { "✓" } else { "✗" };
+        println!("{commit_id} : {result}");
         Ok(true)
     })?;
     Ok(())
@@ -47,7 +49,7 @@ impl GitWalker {
     fn checkout_and_execute_in_range(
         &self,
         range: Range,
-        mut func: impl FnMut() -> Result<bool, String>,
+        mut func: impl FnMut(&Oid) -> Result<bool, String>,
     ) -> Result<(), String> {
         let mut revwalk = self
             .repo
@@ -73,7 +75,7 @@ impl GitWalker {
             self.repo
                 .checkout_tree(tree.as_object(), None)
                 .map_err(|err| format!("failed to checkout commit due to {err}"))?;
-            func()?;
+            func(&commit_id)?;
         }
         Ok(())
     }
@@ -169,7 +171,7 @@ mod tests {
         };
         let (command, args) = parse_command("python3 test.py").unwrap();
         walker
-            .checkout_and_execute_in_range(range, || {
+            .checkout_and_execute_in_range(range, |_| {
                 let result = run_command(
                     &temp_dir.path().join("gitwalker_test_repo"),
                     &command,
