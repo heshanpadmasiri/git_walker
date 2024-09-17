@@ -73,7 +73,7 @@ pub fn execute_test(
         let result = run_command(path, &command.command, &command.args, !command.verbose)?;
         let result = if result { "✓" } else { "✗" };
         let commit_id = commit.id();
-        match commit_message(&commit) {
+        match commit_message(commit) {
             Some(message) => println!("{commit_id} : {message} : {result}"),
             None => println!("{commit_id} : {result}"),
         }
@@ -304,8 +304,10 @@ mod tests {
             end: String::from("59d58e3"),
         };
         let (command, args) = parse_command("python3 test.py").unwrap();
+        let expected_results = vec![true, false];
+        let mut index = 0;
         walker
-            .checkout_and_execute_in_range(range, |_| {
+            .checkout_and_execute_in_range(range, |commit| {
                 let result = run_command(
                     &temp_dir.path().join("gitwalker_test_repo"),
                     &command,
@@ -313,9 +315,13 @@ mod tests {
                     true,
                 )
                 .unwrap();
-                assert!(result);
+                dbg!(result, index, commit);
+                let expected_result = expected_results.get(index).unwrap();
+                index += 1;
+                assert_eq!(result, *expected_result);
                 Ok(true)
             })
-            .unwrap()
+            .unwrap();
+        assert_eq!(index, expected_results.len());
     }
 }
