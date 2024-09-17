@@ -49,6 +49,40 @@ impl GitWalker {
     fn checkout_and_execute_in_range(
         &self,
         range: Range,
+        func: impl FnMut(&Oid) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        let current_branch = self.get_current_branch();
+        let result = self.checkout_and_execute_in_range_inner(range, func);
+        if let Some(branch) = current_branch {
+            self.checkout_branch(&branch)?;
+        }
+        result
+    }
+
+    fn get_current_branch(&self) -> Option<String> {
+        self.repo
+            .head()
+            .ok()
+            .and_then(|head| head.shorthand().map(|s| s.to_string()))
+    }
+
+    fn checkout_branch(&self, branch: &str) -> Result<(), String> {
+        let obj = self
+            .repo
+            .revparse_single(&format!("refs/heads/{}", branch))
+            .map_err(|err| format!("failed to find the branch due to {err}"))?;
+        self.repo
+            .checkout_tree(&obj, None)
+            .map_err(|err| format!("failed to checkout branch {branch} due to {err}"))?;
+        self.repo
+            .set_head(&format!("refs/heads/{}", branch))
+            .map_err(|err| format!("failed to set head to {branch} due to {err}"))?;
+        Ok(())
+    }
+
+    fn checkout_and_execute_in_range_inner(
+        &self,
+        range: Range,
         mut func: impl FnMut(&Oid) -> Result<bool, String>,
     ) -> Result<(), String> {
         let mut revwalk = self
