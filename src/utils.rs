@@ -1,10 +1,66 @@
-use git2::{Repository, RepositoryState};
+use git2::{Oid, Repository, RepositoryState};
 use std::path::Path;
-use std::process::Command;
 
+#[derive(Debug)]
+pub struct Command {
+    pub command: String,
+    pub args: Vec<String>,
+    pub verbose: bool,
+}
+
+impl Command {
+    pub fn as_verbose(&self) -> Command {
+        Command {
+            command: self.command.clone(),
+            args: self.args.clone(),
+            verbose: true,
+        }
+    }
+}
+
+impl TryFrom<&String> for Command {
+    type Error = String;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
+
+impl TryFrom<String> for Command {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(&value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
+
+impl TryFrom<&str> for Command {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let (command, args) = parse_command(value)?;
+        Ok(Command {
+            command,
+            args,
+            verbose: false,
+        })
+    }
+}
+
+// TODO: add option to be silent
 pub fn execute_test(
     path: &Path,
-    command: &str,
+    command: &Command,
     start_commit: &str,
     end_commit: &str,
 ) -> Result<(), String> {
@@ -13,10 +69,10 @@ pub fn execute_test(
         start: start_commit.to_owned(),
         end: end_commit.to_owned(),
     };
-    let (command, args) = parse_command(command)?;
-    walker.checkout_and_execute_in_range(range, || {
-        let result = run_command(path, &command, &args)?;
-        println!("{result}");
+    walker.checkout_and_execute_in_range(range, |commit_id| {
+        let result = run_command(path, &command.command, &command.args, !command.verbose)?;
+        let result = if result { "✓" } else { "✗" };
+        println!("{commit_id} : {result}");
         Ok(true)
     })?;
     Ok(())
@@ -47,7 +103,41 @@ impl GitWalker {
     fn checkout_and_execute_in_range(
         &self,
         range: Range,
-        mut func: impl FnMut() -> Result<bool, String>,
+        func: impl FnMut(&Oid) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        let current_branch = self.get_current_branch();
+        let result = self.checkout_and_execute_in_range_inner(range, func);
+        if let Some(branch) = current_branch {
+            self.checkout_branch(&branch)?;
+        }
+        result
+    }
+
+    fn get_current_branch(&self) -> Option<String> {
+        self.repo
+            .head()
+            .ok()
+            .and_then(|head| head.shorthand().map(|s| s.to_string()))
+    }
+
+    fn checkout_branch(&self, branch: &str) -> Result<(), String> {
+        let obj = self
+            .repo
+            .revparse_single(&format!("refs/heads/{}", branch))
+            .map_err(|err| format!("failed to find the branch due to {err}"))?;
+        self.repo
+            .checkout_tree(&obj, None)
+            .map_err(|err| format!("failed to checkout branch {branch} due to {err}"))?;
+        self.repo
+            .set_head(&format!("refs/heads/{}", branch))
+            .map_err(|err| format!("failed to set head to {branch} due to {err}"))?;
+        Ok(())
+    }
+
+    fn checkout_and_execute_in_range_inner(
+        &self,
+        range: Range,
+        mut func: impl FnMut(&Oid) -> Result<bool, String>,
     ) -> Result<(), String> {
         let mut revwalk = self
             .repo
@@ -73,7 +163,7 @@ impl GitWalker {
             self.repo
                 .checkout_tree(tree.as_object(), None)
                 .map_err(|err| format!("failed to checkout commit due to {err}"))?;
-            func()?;
+            func(&commit_id)?;
         }
         Ok(())
     }
@@ -89,12 +179,18 @@ fn parse_command(command: &str) -> Result<(String, Vec<String>), String> {
     Ok((first, rest))
 }
 
-fn run_command(path: &Path, command: &str, args: &[String]) -> Result<bool, String> {
-    let status = Command::new(command)
+fn run_command(path: &Path, command: &str, args: &[String], silent: bool) -> Result<bool, String> {
+    let status = std::process::Command::new(command)
         .args(args)
         .current_dir(path)
+        .stdout(if silent {
+            std::process::Stdio::null()
+        } else {
+            std::process::Stdio::inherit()
+        })
         .status()
         .map_err(|err| format!("failed to excute command {command} at {path:?} due to {err}"))?;
+
     Ok(status.success())
 }
 
@@ -169,11 +265,12 @@ mod tests {
         };
         let (command, args) = parse_command("python3 test.py").unwrap();
         walker
-            .checkout_and_execute_in_range(range, || {
+            .checkout_and_execute_in_range(range, |_| {
                 let result = run_command(
                     &temp_dir.path().join("gitwalker_test_repo"),
                     &command,
                     &args,
+                    true,
                 )
                 .unwrap();
                 assert!(result);
