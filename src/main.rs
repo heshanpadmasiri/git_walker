@@ -38,7 +38,10 @@ fn execute_action(action: Action) -> Result<(), String> {
             command,
             path,
         }) => utils::execute_test(&path, &command, &start, &end),
-        Action::Help => Ok(print_help()),
+        Action::Help => {
+            print_help();
+            Ok(())
+        }
     }
 }
 
@@ -48,7 +51,7 @@ fn print_help() {
 
 fn parse_args() -> Result<Args, String> {
     let args: Vec<String> = env::args().collect();
-    let command = args.iter().nth(1).ok_or("expected a command")?;
+    let command = args.get(1).ok_or("expected a command")?;
     let args = args
         .iter()
         .skip(2)
@@ -115,14 +118,9 @@ fn parse_command(remaining_args: &[String]) -> Result<Command, String> {
     }
 }
 
+#[derive(Default)]
 struct ArgOptions {
     verbose: bool,
-}
-
-impl Default for ArgOptions {
-    fn default() -> Self {
-        Self { verbose: false }
-    }
 }
 
 fn parse_options(remaining_args: &[String]) -> Result<ArgOptions, String> {
