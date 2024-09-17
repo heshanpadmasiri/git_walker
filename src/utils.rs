@@ -163,6 +163,9 @@ impl GitWalker {
             self.repo
                 .checkout_tree(tree.as_object(), None)
                 .map_err(|err| format!("failed to checkout commit due to {err}"))?;
+            self.repo
+                .reset(commit.as_object(), git2::ResetType::Hard, None)
+                .map_err(|err| format!("failed to reset to commit due to {err}"))?;
             func(&commit_id)?;
         }
         Ok(())
