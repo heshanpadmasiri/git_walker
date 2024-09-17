@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Rust",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/${workspaceFolderBasename}",
+            "args": [
+                "test",
+                "${workspaceFolder}/../git_walker_test",
+                "470ba9d6",
+                "59d1062b",
+                "python3 test.py",
+                "--verbose"
+            ],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ],
+            "stopOnEntry": false,
+            "preLaunchTask": "cargo build",
+            "console": "integratedTerminal"
+        }
+    ]
+}

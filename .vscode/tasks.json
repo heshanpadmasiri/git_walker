@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cargo build", // Task name, referenced in the preLaunchTask
+			"type": "shell", // Use the shell type to run terminal commands
+			"command": "cargo build", // The command to execute (build the Rust project)
+			"group": {
+				"kind": "build", // Marks this task as part of the "build" group
+				"isDefault": true // Makes it the default build task
+			},
+		}
+	]
+}
