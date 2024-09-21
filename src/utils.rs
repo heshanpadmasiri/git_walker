@@ -57,7 +57,76 @@ impl TryFrom<&str> for Command {
     }
 }
 
-// TODO: add option to be silent
+#[derive(Debug)]
+struct AtomizeCandidate {
+    failing_commits: Vec<Oid>,
+    target_commit: Oid,
+}
+
+#[derive(Debug)]
+struct AtomizationContext {
+    candidates: Vec<AtomizeCandidate>,
+    last_good: Option<(Oid, Vec<Oid>)>,
+}
+
+enum CommitState {
+    Working,
+    Failing,
+}
+
+impl AtomizationContext {
+    fn new() -> AtomizationContext {
+        return AtomizationContext {
+            candidates: vec![],
+            last_good: None,
+        };
+    }
+
+    fn append_commit(&mut self, state: CommitState, id: Oid) {
+        match state {
+            CommitState::Working => {
+                if let Some((target_commit, failing_commits)) = &self.last_good {
+                    self.candidates.push(AtomizeCandidate {
+                        failing_commits: failing_commits.clone(),
+                        target_commit: *target_commit,
+                    });
+                }
+                self.last_good = Some((id, vec![]));
+            }
+            CommitState::Failing => {
+                if let Some((_, failing_commits)) = &mut self.last_good {
+                    failing_commits.push(id);
+                }
+            }
+        }
+    }
+}
+
+pub fn execute_atomize(
+    path: &Path,
+    command: &Command,
+    start_commit: &str,
+    end_commit: &str,
+) -> Result<(), String> {
+    let walker = GitWalker::init(path)?;
+    let range = Range {
+        start: start_commit.to_owned(),
+        end: end_commit.to_owned(),
+    };
+    let mut context = AtomizationContext::new();
+    let _ = walker.checkout_and_execute_in_range(range, |commit| {
+        let state = if run_command(path, &command.command, &command.args, !command.verbose)? {
+            CommitState::Working
+        } else {
+            CommitState::Failing
+        };
+        context.append_commit(state, commit.id());
+        Ok(true)
+    });
+    dbg!(context);
+    todo!()
+}
+
 pub fn execute_test(
     path: &Path,
     command: &Command,
