@@ -59,6 +59,7 @@ impl TryFrom<&str> for Command {
 
 #[derive(Debug)]
 struct AtomizeCandidate {
+    // We should squash all the commits except the last commit in failing commits to target commit
     failing_commits: Vec<Oid>,
     target_commit: Oid,
 }
@@ -72,6 +73,27 @@ struct AtomizationContext {
 enum CommitState {
     Working,
     Failing,
+}
+
+#[derive(Debug)]
+struct RebaseContext {
+    squash: Vec<Oid>,
+}
+
+impl From<&AtomizationContext> for RebaseContext {
+    fn from(cx: &AtomizationContext) -> RebaseContext {
+        assert!(cx.last_good.is_none());
+        let squash = cx
+            .candidates
+            .iter()
+            .flat_map(|c| {
+                let mut commits = vec![c.target_commit];
+                commits.extend_from_slice(&c.failing_commits[0..c.failing_commits.len() - 1]);
+                commits
+            })
+            .collect();
+        RebaseContext { squash }
+    }
 }
 
 impl AtomizationContext {
@@ -100,6 +122,17 @@ impl AtomizationContext {
             }
         }
     }
+
+    fn finalize(&mut self) -> RebaseContext {
+        let last_good = self.last_good.take();
+        if let Some((target_commit, failing_commits)) = last_good {
+            self.candidates.push(AtomizeCandidate {
+                failing_commits,
+                target_commit,
+            });
+        }
+        RebaseContext::from(&*self)
+    }
 }
 
 pub fn execute_atomize(
@@ -123,6 +156,8 @@ pub fn execute_atomize(
         context.append_commit(state, commit.id());
         Ok(true)
     });
+    dbg!(&context);
+    let context = context.finalize();
     dbg!(context);
     todo!()
 }
